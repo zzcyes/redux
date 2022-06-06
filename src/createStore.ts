@@ -68,6 +68,10 @@ export default function createStore<
   preloadedState?: PreloadedState<S> | StoreEnhancer<Ext, StateExt>,
   enhancer?: StoreEnhancer<Ext, StateExt>
 ): Store<ExtendState<S, StateExt>, A, StateExt, Ext> & Ext {
+  // 校验 preloadedState 和 enhancer 传参
+  // 1. 两者皆为函数类型，报错
+  // 2. enhancer为函数，并且第四个传参也为函数类型
+  // 如果要用多个store enhancers ，建议使用compose 将其合并为单个函数传入
   if (
     (typeof preloadedState === 'function' && typeof enhancer === 'function') ||
     (typeof enhancer === 'function' && typeof arguments[3] === 'function')
@@ -79,12 +83,15 @@ export default function createStore<
     )
   }
 
+  // 如果 preloadedState 为函数，并且 enhancer 未定义，那么把 preloadedState 的值赋予 enhancer
+  // 并将 preloadedState 置为 undefined
   if (typeof preloadedState === 'function' && typeof enhancer === 'undefined') {
     enhancer = preloadedState as StoreEnhancer<Ext, StateExt>
     preloadedState = undefined
   }
 
   if (typeof enhancer !== 'undefined') {
+    // enhancer 必须为函数类型
     if (typeof enhancer !== 'function') {
       throw new Error(
         `Expected the enhancer to be a function. Instead, received: '${kindOf(
@@ -93,12 +100,15 @@ export default function createStore<
       )
     }
 
+    // 存在 enhancer 意味着需要增强 store，直接 return enhancer操作
+    // 这里也可以判断出 enhancer 函数的返回值 与 createStore 的返回值是一样的
     return enhancer(createStore)(
       reducer,
       preloadedState as PreloadedState<S>
     ) as Store<ExtendState<S, StateExt>, A, StateExt, Ext> & Ext
   }
 
+  // reducer 必须为函数类型，否则报错
   if (typeof reducer !== 'function') {
     throw new Error(
       `Expected the root reducer to be a function. Instead, received: '${kindOf(
@@ -120,6 +130,9 @@ export default function createStore<
    * This prevents any bugs around consumers calling
    * subscribe/unsubscribe in the middle of a dispatch.
    */
+  // 浅拷贝 currentListeners，使得 nextListeners 作为一个临时列表
+  // 可以阻止任何围绕消费者的 bug（）
+  // 在调度过程中进行订阅/取消订阅
   function ensureCanMutateNextListeners() {
     if (nextListeners === currentListeners) {
       nextListeners = currentListeners.slice()
@@ -131,6 +144,7 @@ export default function createStore<
    *
    * @returns The current state tree of your application.
    */
+  // getState 函数是一个闭包，返回 createStore 函数内部定义的 currentState 
   function getState(): S {
     if (isDispatching) {
       throw new Error(
@@ -167,6 +181,7 @@ export default function createStore<
    * @returns A function to remove this change listener.
    */
   function subscribe(listener: () => void) {
+    // listener 必须为函数
     if (typeof listener !== 'function') {
       throw new Error(
         `Expected the listener to be a function. Instead, received: '${kindOf(
@@ -190,6 +205,7 @@ export default function createStore<
     nextListeners.push(listener)
 
     return function unsubscribe() {
+      // 防止多次触发 unsubscribe
       if (!isSubscribed) {
         return
       }
@@ -236,6 +252,7 @@ export default function createStore<
    * return something else (for example, a Promise you can await).
    */
   function dispatch(action: A) {
+    // action 必须为一个对象
     if (!isPlainObject(action)) {
       throw new Error(
         `Actions must be plain objects. Instead, the actual type was: '${kindOf(
@@ -244,6 +261,7 @@ export default function createStore<
       )
     }
 
+    // action 必须包含 type
     if (typeof action.type === 'undefined') {
       throw new Error(
         'Actions may not have an undefined "type" property. You may have misspelled an action type string constant.'
@@ -254,6 +272,11 @@ export default function createStore<
       throw new Error('Reducers may not dispatch actions.')
     }
 
+    // 执行 currentReducer, 并将返回值赋值给 currentState，即更新 currentState
+    // 刚创建 createStore 时，currentState 为 preloadedState
+    // 并且，在createStore 内部，会通过 dispatch({ type: ActionTypes.INIT } as A)  
+    // 初始化 currentState 默认值。
+    // 此后则通过 dispatch 更新 currentState 的值
     try {
       isDispatching = true
       currentState = currentReducer(currentState, action)
@@ -261,6 +284,10 @@ export default function createStore<
       isDispatching = false
     }
 
+    // 遍历订阅的事件并触发
+    // 把 nextListeners 值赋给 currentListeners，是因为在 unsubscribe 
+    // 过程中，有  nextListeners.splice 操作，需要把 currentListeners 
+    // 更新为最新值
     const listeners = (currentListeners = nextListeners)
     for (let i = 0; i < listeners.length; i++) {
       const listener = listeners[i]
@@ -356,8 +383,10 @@ export default function createStore<
   // When a store is created, an "INIT" action is dispatched so that every
   // reducer returns their initial state. This effectively populates
   // the initial state tree.
+  // 初始化 currentState 的 值
   dispatch({ type: ActionTypes.INIT } as A)
 
+  // createStore 返回一个 store 对象 
   const store = {
     dispatch: dispatch as Dispatch<A>,
     subscribe,
